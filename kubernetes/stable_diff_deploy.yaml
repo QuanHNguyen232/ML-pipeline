@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stable-diffusion
+  labels:
+    app: stable-diffusion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stable-diffusion
+  template:
+    metadata:
+      labels:
+        app: stable-diffusion
+    spec:
+      containers:
+      - name: stable-diffusion
+        image: docker.io/universonic/stable-diffusion-webui:nightly-20240515030400-full
+        resources:
+          limits:
+            nvidia.com/gpu: 1 # Requesting 1 NVIDIA GPU
+      nodeSelector:
+        gpu.nvidia.com/class: L40S # New selector for specific GPU class
