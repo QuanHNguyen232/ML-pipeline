@@ -100,13 +100,34 @@ kubectl logs deployment/vllm-server
 ---
 
 ## 8. Clean Up
-To remove all vLLM resources:
+1. To remove all vLLM resources:
 ```bash
 kubectl delete -f kubernetes/vllm-deployment.yaml
 kubectl delete -f kubernetes/vllm-service.yaml
 kubectl delete -f kubernetes/vllm-pvc.yaml
 ```
 
+1. Delete Any Remaining Pods or Services
+If you want to ensure everything is gone, you can list and delete all pods and services in the default namespace:
+```bash
+kubectl get pods
+kubectl get svc
+```
+Then, for any remaining resources:
+```bash
+kubectl delete pod <pod-name>
+kubectl delete svc <service-name>
+```
+
+1. (Optional) Delete PVCs and Secrets
+If you created any other PVCs or secrets:
+```bash
+kubectl get pvc
+kubectl delete pvc <pvc-name>
+
+kubectl get secrets
+kubectl delete secret <secret-name>
+```
 ---
 
 ## Troubleshooting
