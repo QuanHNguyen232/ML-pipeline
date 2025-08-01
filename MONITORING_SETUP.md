@@ -190,11 +190,44 @@ The dashboard includes variables for model selection. You can:
   - Cache Utilization
   - Request Prompt/Generation Length Heatmaps
 
+#### Dashboard Screenshots
+
+Here are examples of the vLLM monitoring dashboard in action with your OPT-125m model:
+
+**Main Dashboard Overview:**
+![vLLM Dashboard Overview](assets/grafana_fb-opt-125m_fig0.jpg)
+
+**Detailed Metrics View:**
+![vLLM Detailed Metrics](assets/grafana_fb-opt-125m_fig1.jpg)
+
+The dashboard shows real-time metrics from your vLLM deployment, including:
+- **Request Latency**: End-to-end request processing time
+- **Token Throughput**: Tokens processed per second
+- **Scheduler State**: Number of running and waiting requests
+- **Cache Utilization**: GPU cache usage percentage
+- **Request Patterns**: Heatmaps showing prompt and generation lengths
+
 ## Testing the Setup
 
 ### Generate Load for Monitoring
 
 You can test the monitoring by sending requests to your vLLM API:
+
+#### Option 1: Using the Test Script
+
+Use the provided test script to generate significant load:
+
+```bash
+# Run the test script (sends 1000 requests)
+python src/test_vllm_api.py
+```
+
+This script will:
+- Send 1000 completion requests to your vLLM API
+- Generate metrics that will appear in Grafana
+- Show real-time performance data
+
+#### Option 2: Manual Testing
 
 ```bash
 # Test a simple completion request
