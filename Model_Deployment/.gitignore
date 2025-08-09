@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Deployment
+# vLLM model
+core.*
+# downloaded models
+models_local/
+!models_local/.gitkeep
