@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+    spec:
+      volumes:
+      # PVC for model cache, also update "volumeMounts"
+      # - name: model-cache
+      #   persistentVolumeClaim:
+      #     claimName: vllm-models
+      # SHM for tensor parallel inference
+      - name: shm
+        emptyDir:
+          medium: Memory
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.10.1
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args: [
+          # "--host=0.0.0.0",
+          # "--port=8000",
+          "--model=${MODEL_ID}",
+          "--trust-remote-code",
+          "--enable-chunked-prefill",
+          "--max-num-batched-tokens=1024"
+        ]
+        env:
+          - name: HUGGING_FACE_HUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-secret
+                key: hf_api_token
+          - name: MODEL_ID
+            value: 'mistralai/Mistral-7B-Instruct-v0.3'
+          - name: LD_LIBRARY_PATH
+            value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+        ports:
+          - containerPort: 8000
+        resources:
+          requests:
+            cpu: "2"
+            memory: 6G
+            ephemeral-storage: 10G
+            nvidia.com/gpu: 1
+          limits:
+            cpu: "10"
+            memory: 20G
+            ephemeral-storage: 100G
+            nvidia.com/gpu: 1
+        volumeMounts:
+          # - name: model-cache
+          #   mountPath: /root/.cache/huggingface
+          - name: shm
+            mountPath: /dev/shm
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          failureThreshold: 90
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 5
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4 # Machine type G2 (https://cloud.google.com/compute/docs/gpus/gpu-regions-zones)
