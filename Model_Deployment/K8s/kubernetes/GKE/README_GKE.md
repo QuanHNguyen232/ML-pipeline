@@ -8,7 +8,7 @@ https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
 Request GPU in GKE: https://cloud.google.com/kubernetes-engine/docs/how-to/autopilot-gpus#request-gpus
 
 ## Next steps:
-- [ ] Deploy Qwen3-32b (using 2 A100-40GB GPUs). Since it's too large, we must set `--max-model-len=8000`
+- [X] Deploy Qwen3-32b (using 2 A100-40GB GPUs). Since it's too large, we must set `--max-model-len=8000`
 - [ ] Expose deployment[feedbackExposing applications using services](https://cloud.google.com/kubernetes-engine/docs/how-to/exposing-apps)
 - [ ] Add monitoring
 - [ ] Optimizing (use TPU):
@@ -35,6 +35,29 @@ Replace GPU_TYPE with the type of GPU in your target nodes. This can be one of t
 `nvidia-l4`: NVIDIA L4
 `nvidia-tesla-t4`: NVIDIA T4
 
+## Model Size Resource Requirements
+
+| Model Size Range | System RAM (requests) | System RAM (limits) | PVC Storage | Recommended GPU | Examples |
+|------------------|----------------------|---------------------|-------------|-----------------|----------|
+| **≤5GB** | 4-6GB | 8-12GB | 20-30GB | nvidia-l4, nvidia-tesla-t4 | Gemma-2B, Phi-3-mini, Qwen2-1.5B |
+| **5-10GB** | 6-10GB | 12-20GB | 30-50GB | nvidia-l4, nvidia-tesla-a100 | Gemma-7B, Llama-3.1-8B, Mistral-7B |
+| **10-20GB** | 10-16GB | 20-32GB | 50-80GB | nvidia-tesla-a100, nvidia-a100-80gb | Llama-3.1-70B (quantized), Qwen2.5-32B |
+| **20-30GB** | 16-24GB | 32-48GB | 80-120GB | nvidia-a100-80gb, nvidia-h100-80gb | Llama-3.1-70B, Mixtral-8x7B |
+| **30-50GB** | 24-32GB | 48-64GB | 120-200GB | nvidia-h100-80gb, nvidia-h100-mega-80gb | Qwen2.5-72B, Llama-3.1-405B (quantized) |
+| **50-70GB** | 32-48GB | 64-96GB | 200-300GB | nvidia-h100-mega-80gb, nvidia-h200-141gb | Large quantized models, Mixtral-8x22B |
+
+### Resource Guidelines:
+- **System RAM**: Used for model loading, CPU computations, and vLLM framework overhead
+- **PVC Storage**: Used for persistent model cache, avoiding re-downloads on pod restarts
+- **GPU Memory**: Should be 1.5-2x the model size for optimal performance
+- **Shared Memory (dshm)**: 2-8GB depending on model size and tensor parallel configuration
+
+### Notes:
+- For models >70GB, consider using tensor parallelism across multiple GPUs
+- Quantized models (4-bit, 8-bit) require significantly less GPU memory
+- Add 20-30% buffer to PVC storage for model updates and temporary files
+- Monitor actual usage and adjust resources based on workload patterns
+
 ## Prepare environment
 ```bash
 gcloud config set project venerian
@@ -49,13 +72,9 @@ export NAMESPACE=llm
 ```
 
 ## Create a GKE cluster and node pool
-1. (autopilot mode)
-Link: https://cloud.google.com/sdk/gcloud/reference/container/clusters/create
+1. Autopilot (recommend)
+Ref: https://cloud.google.com/sdk/gcloud/reference/container/clusters/create
 ```bash
-# gcloud container clusters create-auto $CLUSTER_NAME \
-#     --project=$PROJECT_ID \
-#     --region=$REGION \
-#     --release-channel=rapid
 gcloud container clusters create-auto $CLUSTER_NAME \
     --project=$PROJECT_ID \
     --location=$CONTROL_PLANE_LOCATION \
@@ -79,15 +98,19 @@ gcloud container clusters get-credentials $CLUSTER_NAME \
 ```
 
 ## Create namespace
+```bash
 kubectl create namespace "$NAMESPACE" || true
+
 # Optionally set the default namespace for this context
 kubectl config set-context --current --namespace="$NAMESPACE"
+```
 
 ## Checking info
 ```bash
-# Quick check: is this an Autopilot cluster?
-# Expect: true for Autopilot
-```bash
+# Verify context
+kubectl config current-context
+
+# Quick check: is this an Autopilot cluster? Expect: true for Autopilot
 gcloud container clusters describe $CLUSTER_NAME --region $REGION --format='value(autopilot.enabled)'
 
 # Check GPU
@@ -104,16 +127,28 @@ kubectl -n "$NAMESPACE" create secret generic hf-secret \
     --from-literal=hf_api_token=${HF_TOKEN} \
     --dry-run=client -o yaml | kubectl -n "$NAMESPACE" apply -f -
 # OR
-kubectl apply -n "$NAMESPACE" -f hf-token-secret.yaml
+kubectl apply -n $NAMESPACE -f hf-token-secret.yaml
 ```
 
 ## Create PVC
-kubectl apply -n $NAMESPACE -f vllm-pvc-gke.yaml
+```bash
+kubectl apply -n $NAMESPACE -f <pvc-file-name>.yaml
+```
+
+### Check PVC status
+Check that the PVC is **Bound**:
+```bash
+kubectl -n $NAMESPACE get pvc
+```
+If not bound, troubleshoot with:
+```bash
+kubectl -n $NAMESPACE describe pvc <pvc-name>
+```
 
 ## Deploy
 kubectl apply -n $NAMESPACE -f vllm-deployment-name.yaml
 
-## Check deployment status
+### Check deployment status
 ```bash
 # Check ready: Wait until "get pods" shows READY=1/1 and STATUS=Running.
 kubectl -n $NAMESPACE get pods -o wide
@@ -130,23 +165,53 @@ kubectl -n $NAMESPACE exec -it deploy/vllm-qwen3-deployment -- bash -lc 'du -sh 
 
 ```
 
-# Now GPU should be shown:
+## Now GPU should be shown:
 ```bash
 kubectl get nodes -L cloud.google.com/gke-accelerator \
   -o=custom-columns=NAME:.metadata.name,ACCELERATOR:.metadata.labels.cloud\\.google\\.com/gke-accelerator,GPU:.status.allocatable.nvidia\\.com/gpu
+
+# OR Check if GPU nodes are available
+kubectl get nodes -o wide
+# Verify GPU resources
+kubectl describe nodes | grep -A 10 "Allocated resources"
 ```
 
-## test
+## Access the vLLM Service
+### With LoadBalancer Service (Automatic)
+The LoadBalancer service automatically creates an external IP. Check the service status:
+```bash
+kubectl -n $NAMESPACE get svc vllm-server
+
+# Test with a question
+# http://<EXTERNAL-IP>:8000/ OR http://<EXTERNAL-IP>/ ???
+curl http://<EXTERNAL-IP>:8000/v1/chat/completions \
+-X POST \
+-H "Content-Type: application/json" \
+-d '{
+    "model": "google/gemma-3-1b-it",
+    "messages": [
+        {
+          "role": "user",
+          "content": "Why is the sky blue?"
+        }
+    ],
+    "temperature": 0
+}'
+
+```
+Look for the `EXTERNAL-IP` column to get your external IP address.
+
+### Port-Forward for Local/Internal Access
 ```bash
 # port-forward: Your Service is ClusterIP, so it’s only reachable inside the cluster. kubectl port-forward service/llm-service 8000:8000 creates a temporary local tunnel so you can test the API at http://127.0.0.1:8000 from your Cloud Shell or laptop.
-kubectl -n $NAMESPACE port-forward service/llm-service 8000:8000
+kubectl -n $NAMESPACE port-forward service/{service-name} 8000:8000
 
 # Test with a question
 curl http://127.0.0.1:8000/v1/chat/completions \
 -X POST \
 -H "Content-Type: application/json" \
 -d '{
-    "model": "Qwen/Qwen3-32B",
+    "model": "google/gemma-3-1b-it",
     "messages": [
         {
           "role": "user",
@@ -155,6 +220,79 @@ curl http://127.0.0.1:8000/v1/chat/completions \
     ]
 }'
 ```
+
+## Clean Up
+
+### 1. **Remove vLLM Resources**
+```bash
+# Remove deployment (choose the one you deployed)
+kubectl delete -f kubernetes/vllm-deployment-mistral-7b-gke.yaml
+# OR
+kubectl delete -f kubernetes/vllm-deployment-gke.yaml
+
+# Remove other resources
+kubectl delete -f kubernetes/vllm-service-gke.yaml
+# OR if using internal service
+# kubectl delete -f kubernetes/vllm-service-internal-gke.yaml
+kubectl delete -f kubernetes/vllm-pvc-gke.yaml
+```
+
+### 2. **Delete GKE Cluster**
+```bash
+gcloud container clusters delete vllm-cluster --zone=us-central1-a
+```
+
+### 3. **Clean Up LoadBalancer (Automatic)**
+The LoadBalancer service is automatically cleaned up when you delete the service. No manual cleanup needed.
+
+
+
+## Troubleshooting
+
+### 1. **GPU Not Available**
+```bash
+# Check GPU operator status
+kubectl get pods -n kube-system | grep nvidia
+
+# Check GPU resources
+kubectl describe nodes | grep -A 10 "Allocated resources"
+```
+
+### 2. **PVC Not Binding**
+```bash
+# Check available storage classes
+kubectl get storageclass
+
+# Check PV status
+kubectl get pv
+```
+
+### 3. **Pod Stuck in Pending**
+```bash
+# Check pod events
+kubectl describe pod <pod-name>
+
+# Check node resources
+kubectl describe nodes
+```
+
+### 4. **Service Not Accessible**
+```bash
+# Check service status
+kubectl get svc
+
+# Check endpoints
+kubectl get endpoints vllm-server
+```
+
+## References
+
+- [GKE Documentation](https://cloud.google.com/kubernetes-engine/docs)
+- [GKE GPU Support](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus)
+- [vLLM Documentation](https://docs.vllm.ai/)
+- [Kubernetes GPU Support](https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/)
+- [GKE Storage Classes](https://cloud.google.com/kubernetes-engine/docs/concepts/persistent-volumes)
+
 
 ## vLLM Args
 ```bash

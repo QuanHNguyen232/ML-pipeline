@@ -1,0 +1,13 @@
+# https://docs.vllm.ai/en/v0.9.0/deployment/k8s.html#deployment-with-gpus
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard-rwo  # GKE-specific storage class
+  volumeMode: Filesystem

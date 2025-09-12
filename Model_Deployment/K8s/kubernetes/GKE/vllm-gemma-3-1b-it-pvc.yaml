@@ -1,3 +1,4 @@
+# https://cloud.google.com/kubernetes-engine/docs/tutorials/serve-gemma-gpu-vllm
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,28 +14,28 @@ spec:
         app: gemma-server
         ai.gke.io/model: gemma-3-1b-it
         ai.gke.io/inference-server: vllm
-        examples.ai.gke.io/source: user-guide
     spec:
       containers:
       - name: inference-server
         image: docker.io/vllm/vllm-openai:v0.10.0
         resources:
+        # System RAM for vLLM process
           requests:
             cpu: "2"
             memory: "10Gi"
-            ephemeral-storage: "10Gi"
             nvidia.com/gpu: "1"
+        # System RAM for vLLM process
           limits:
             cpu: "2"
             memory: "10Gi"
-            ephemeral-storage: "10Gi"
             nvidia.com/gpu: "1"
         command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-        args:
-        - --model=$(MODEL_ID)
-        - --tensor-parallel-size=1
-        - --host=0.0.0.0
-        - --port=8000
+        args: [
+          "--model=$(MODEL_ID)",
+          "--tensor-parallel-size=1",
+          "--host=0.0.0.0",
+          "--port=8000"
+        ]
         env:
         - name: LD_LIBRARY_PATH
           value: ${LD_LIBRARY_PATH}:/usr/local/nvidia/lib64
@@ -48,10 +49,16 @@ spec:
         volumeMounts:
         - mountPath: /dev/shm
           name: dshm
+        - mountPath: /root/.cache/huggingface # Disk storage for model cache
+          name: model-cache
       volumes:
       - name: dshm
         emptyDir:
             medium: Memory
+            sizeLimit: "2Gi"
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: vllm-pvc
       nodeSelector:
         cloud.google.com/gke-accelerator: nvidia-l4
         cloud.google.com/gke-gpu-driver-version: latest
@@ -68,3 +75,5 @@ spec:
     - protocol: TCP
       port: 8000
       targetPort: 8000
+
+
