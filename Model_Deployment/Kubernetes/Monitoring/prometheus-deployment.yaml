@@ -54,7 +54,7 @@ data:
       - job_name: vllm-k8s
         static_configs:
           - targets:
-              - 'vllm-server:8000'
+              - 'vllm-service:8000'
         metrics_path: '/metrics'
         scrape_interval: 5s
 ---

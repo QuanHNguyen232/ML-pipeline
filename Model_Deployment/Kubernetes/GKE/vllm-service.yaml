@@ -13,7 +13,7 @@ spec:
   sessionAffinity: None
   type: LoadBalancer
 
-# ClusterIP (Internal)
+# # ClusterIP (Internal)
 # apiVersion: v1
 # kind: Service
 # metadata:
