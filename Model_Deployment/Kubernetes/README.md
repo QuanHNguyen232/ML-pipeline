@@ -446,7 +446,7 @@ Here are URLs:
    - Password: `admin`
 1. (Optional) Update password: SKIP
 1. Go to **Dashboards** -> **New** -> **Import**
-1. Click **Upload JSON file**. Select the `prometheus_grafana/grafana.json` file
+1. Click **Upload JSON file**. Select the `./Monitoring/prometheus_grafana/grafana.json` file
 1. Click **Load**
 1. Now the **Dashboards** should show new Dashboard you have just imported:
     1. Click that Dashboard
